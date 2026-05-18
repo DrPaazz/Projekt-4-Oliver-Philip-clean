@@ -1,0 +1,30 @@
+---
+- name: Skapa användare och grupper på alla maskiner
+  hosts: all
+  become: true
+  vars_files:
+    - group_vars/all.yml
+
+  tasks:
+    - name: Uppdatera apt-cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Skapa grupper
+      group:
+        name: "{{ item.name }}"
+        gid: "{{ item.gid }}"
+        state: present
+      loop: "{{ groups_to_create }}"
+
+    - name: Skapa användare
+      user:
+        name: "{{ item.name }}"
+        uid: "{{ item.uid }}"
+        groups: "{{ item.groups }}"
+        append: true
+        shell: /bin/bash
+        create_home: true
+        state: present
+      loop: "{{ users_to_create }}"

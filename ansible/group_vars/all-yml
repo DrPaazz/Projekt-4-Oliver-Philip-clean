@@ -1,0 +1,21 @@
+nfs_server_ip: "192.168.56.10"
+nfs_network: "192.168.56.0/24"
+
+groups_to_create:
+  - name: alla
+    gid: 2000
+  - name: avd_a
+    gid: 2001
+  - name: avd_b
+    gid: 2002
+
+users_to_create:
+  - name: anna
+    uid: 3001
+    groups: "alla,avd_a"
+  - name: bert
+    uid: 3002
+    groups: "alla,avd_b"
+  - name: clara
+    uid: 3003
+    groups: "alla,avd_a,avd_b"
