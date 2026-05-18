@@ -19,3 +19,19 @@ users_to_create:
   - name: clara
     uid: 3003
     groups: "alla,avd_a,avd_b"
+    
+shares:
+  - name: gemensam
+    path: /shares/gemensam
+    group: alla
+    mode: "2775"
+
+  - name: avdelning-a
+    path: /shares/avdelning-a
+    group: avd_a
+    mode: "2770"
+
+  - name: avdelning-b
+    path: /shares/avdelning-b
+    group: avd_b
+    mode: "2770"

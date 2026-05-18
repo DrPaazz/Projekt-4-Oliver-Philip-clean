@@ -28,3 +28,52 @@
         create_home: true
         state: present
       loop: "{{ users_to_create }}"
+      
+- name: Konfigurera NFS-server
+  hosts: nfs_server
+  become: true
+  vars_files:
+    - group_vars/all.yml
+
+  tasks:
+    - name: Installera NFS-server
+      apt:
+        name: nfs-kernel-server
+        state: present
+        update_cache: true
+
+    - name: Skapa huvudkatalog för shares
+      file:
+        path: /shares
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Skapa kataloger för shares
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop: "{{ shares }}"
+
+    - name: Konfigurera NFS exports
+      copy:
+        dest: /etc/exports
+        content: |
+          {% for share in shares %}
+          {{ share.path }} {{ nfs_network }}(rw,sync,no_subtree_check,root_squash)
+          {% endfor %}
+      notify: Ladda om NFS exports
+
+    - name: Starta och aktivera NFS-server
+      service:
+        name: nfs-kernel-server
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Ladda om NFS exports
+      command: exportfs -ra
