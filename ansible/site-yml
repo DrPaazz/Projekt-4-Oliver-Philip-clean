@@ -77,3 +77,31 @@
   handlers:
     - name: Ladda om NFS exports
       command: exportfs -ra
+      
+      - name: Konfigurera NFS-klienter
+  hosts: clients
+  become: true
+  vars_files:
+    - group_vars/all.yml
+
+  tasks:
+    - name: Installera NFS-klient
+      apt:
+        name: nfs-common
+        state: present
+        update_cache: true
+
+    - name: Skapa monteringspunkter
+      file:
+        path: "/mnt/{{ item.name }}"
+        state: directory
+      loop: "{{ shares }}"
+
+    - name: Montera NFS-shares automatiskt
+      mount:
+        path: "/mnt/{{ item.name }}"
+        src: "{{ nfs_server_ip }}:{{ item.path }}"
+        fstype: nfs
+        opts: "rw,_netdev"
+        state: mounted
+      loop: "{{ shares }}"
