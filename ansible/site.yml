@@ -99,6 +99,10 @@
           {% endfor %}
       notify: Ladda om NFS exports
 
+    - name: Ladda om NFS exports direkt
+      command: exportfs -ra
+      changed_when: false
+
     - name: Starta och aktivera NFS-server
       service:
         name: nfs-kernel-server
