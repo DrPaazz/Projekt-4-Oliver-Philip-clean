@@ -35,3 +35,12 @@ shares:
     path: /shares/avdelning-b
     group: avd_b
     mode: "2770"
+
+quotas:
+  - group: avd_a
+    soft: 20480
+    hard: 25600
+
+  - group: avd_b
+    soft: 20480
+    hard: 25600
