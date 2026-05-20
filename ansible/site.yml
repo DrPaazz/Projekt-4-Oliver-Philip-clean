@@ -1,0 +1,164 @@
+---
+- name: Skapa användare och grupper på alla maskiner
+  hosts: all
+  become: true
+  vars_files:
+    - group_vars/all.yml
+
+  tasks:
+    - name: Uppdatera apt-cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Skapa grupper
+      group:
+        name: "{{ item.name }}"
+        gid: "{{ item.gid }}"
+        state: present
+      loop: "{{ groups_to_create }}"
+
+    - name: Skapa användare
+      user:
+        name: "{{ item.name }}"
+        uid: "{{ item.uid }}"
+        groups: "{{ item.groups }}"
+        append: true
+        shell: /bin/bash
+        create_home: true
+        state: present
+      loop: "{{ users_to_create }}"
+
+
+- name: Konfigurera NFS-server
+  hosts: nfs_server
+  become: true
+  vars_files:
+    - group_vars/all.yml
+
+  tasks:
+    - name: Installera NFS-server, quota och kernelmoduler
+      apt:
+        name:
+          - nfs-kernel-server
+          - quota
+          - "linux-modules-extra-{{ ansible_kernel }}"
+        state: present
+        update_cache: true
+
+    - name: Ladda quota kernel-moduler
+      shell: modprobe quota_v1 || true; modprobe quota_v2 || true
+      changed_when: false
+
+    - name: Skapa dedikerat tjänstkonto för NFS
+      user:
+        name: svc_nfs
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+        state: present
+
+    - name: Skapa fil som används som separat quota-filsystem
+      command: fallocate -l 1G /srv/nfs-quota.img
+      args:
+        creates: /srv/nfs-quota.img
+
+    - name: Kontrollera om quota-filsystemet redan är formaterat
+      command: blkid /srv/nfs-quota.img
+      register: blkid_result
+      failed_when: false
+      changed_when: false
+
+    - name: Formatera quota-filsystemet om det inte redan är formaterat
+      command: mkfs.ext4 -F /srv/nfs-quota.img
+      when: blkid_result.rc != 0
+
+    - name: Montera /shares med quota-stöd
+      mount:
+        path: /shares
+        src: /srv/nfs-quota.img
+        fstype: ext4
+        opts: loop,usrquota,grpquota
+        state: mounted
+
+    - name: Skapa kataloger för shares
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop: "{{ shares }}"
+
+    - name: Konfigurera NFS exports
+      copy:
+        dest: /etc/exports
+        content: |
+          {% for share in shares %}
+          {{ share.path }} {{ nfs_network }}(rw,sync,no_subtree_check,root_squash)
+          {% endfor %}
+      notify: Ladda om NFS exports
+
+    - name: Ladda om NFS exports direkt
+      command: exportfs -ra
+      changed_when: false
+
+    - name: Starta och aktivera NFS-server
+      service:
+        name: nfs-kernel-server
+        state: started
+        enabled: true
+
+    - name: Stäng av befintlig quota före kontroll
+      shell: quotaoff -ug /shares || true
+      changed_when: false
+
+    - name: Kör quotacheck för användare och grupper
+      command: quotacheck -cugm /shares
+      changed_when: false
+
+    - name: Aktivera användar- och gruppkvoter
+      command: quotaon -vug /shares
+      changed_when: false
+
+    - name: Sätt gruppkvoter
+      command: "setquota -g {{ item.group }} {{ item.soft }} {{ item.hard }} 0 0 /shares"
+      loop: "{{ quotas }}"
+
+    - name: Kontrollera quota-status
+      command: quotaon -p /shares
+      changed_when: false
+      failed_when: false
+
+  handlers:
+    - name: Ladda om NFS exports
+      command: exportfs -ra
+
+
+- name: Konfigurera NFS-klienter
+  hosts: clients
+  become: true
+  vars_files:
+    - group_vars/all.yml
+
+  tasks:
+    - name: Installera NFS-klient
+      apt:
+        name: nfs-common
+        state: present
+        update_cache: true
+
+    - name: Skapa monteringspunkter
+      file:
+        path: "/mnt/{{ item.name }}"
+        state: directory
+      loop: "{{ shares }}"
+
+    - name: Montera NFS-shares automatiskt
+      mount:
+        path: "/mnt/{{ item.name }}"
+        src: "{{ nfs_server_ip }}:{{ item.path }}"
+        fstype: nfs
+        opts: "rw,_netdev"
+        state: mounted
+      loop: "{{ shares }}"
