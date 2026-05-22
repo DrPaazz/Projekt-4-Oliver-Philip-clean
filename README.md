@@ -44,7 +44,7 @@ En automatiserad NFS-filserverinfrastruktur med strukturerad katalogorganisation
 
 ## Mappstruktur
 
-```
+```text
 repo/
 ├── Vagrantfile                    # Definierar alla VMs och nätverksinställningar
 │
@@ -58,6 +58,9 @@ repo/
 ├── tests/
 │   └── verify.sh                  # Automatiserat behörighetsverifieringsskript
 │
+├── docs/
+│   └── architecture.png           # Arkitekturbild
+│
 ├── .gitignore                     # Exkluderar .vagrant/, *.vdi, SSH-nycklar m.m.
 └── README.md
 ```
@@ -68,11 +71,15 @@ repo/
 
 ### Vagrantfile
 
-Definierar tre virtuella maskiner i VirtualBox med ett gemensamt privat nätverk (`192.168.56.0/24`). `config.ssh.insert_key = false` gör att alla maskiner använder Vagrants gemensamma insecure key, vilket förenklar Ansible-konfigurationen. Ingen port forwarding — miljön är helt intern.
+Definierar tre virtuella maskiner i VirtualBox med ett gemensamt privat nätverk (`192.168.56.0/24`). `config.ssh.insert_key = false` gör att Vagrant använder sina standardnycklar för SSH-autentisering, vilket förenklar automatisering och Ansible-integration i labbmiljön.
+
+Ingen applikations-portforwarding används. Endast Vagrants automatiska SSH-portforwarding används för administration av VM:arna.
 
 ### ansible/inventory.ini
 
 Grupperar maskinerna i `[nfs_server]` och `[clients]`. Ansible-playbooken använder dessa grupper för att avgöra vilka tasks som körs var — NFS-serverkonfigurationen körs bara mot `nfs_server` och klientmonterings-tasken körs bara mot `clients`.
+
+Inventory-filen använder SSH-användaren `vagrant` och en lokal kopia av Vagrants SSH-nyckel. Nyckeln ligger inte i Git-repot utan skapas lokalt av Vagrant och kopieras sedan till `~/.ssh/server_key`.
 
 ### ansible/group_vars/all.yml
 
@@ -80,7 +87,7 @@ Samlar all konfiguration på ett ställe: nätverksinställningar, grupper med G
 
 ### ansible/site.yml
 
-Huvudplaybooken uppdelad i tre plays som körs i ordning:
+Huvudplaybooken är uppdelad i tre plays som körs i ordning:
 
 1. **Alla maskiner** — skapar grupper och användare med identiska UIDs/GIDs på server och klienter
 2. **NFS-server** — installerar NFS, skapar filsystem för kvoter, konfigurerar exports och aktiverar kvoter
@@ -120,51 +127,137 @@ sudo apt install ansible -y
 
 **Hårdvarukrav:**
 
-- Minst 6 GB RAM (projektet använder ~3 GB)
+- Minst 6 GB RAM
 - Minst 10 GB ledigt diskutrymme
 
 ---
 
 ## Kom igång
 
-**1. Klona repot**
+### 1. Klona repot
+
+Kör från valfri terminal:
 
 ```bash
 git clone https://github.com/malmpko/Projekt-4-Oliver-Philip.git
-cd Projekt-4-Oliver-Philip
 ```
 
-**2. Starta alla VMs (tar 5–10 minuter första gången)**
+---
 
-```bash
+### 2. Starta alla VMs från PowerShell
+
+Öppna PowerShell och gå in i projektmappen:
+
+```powershell
+cd "C:\Users\<dittanvändarnamn>\Projekt-4-Oliver-Philip"
+```
+
+Starta alla virtuella maskiner:
+
+```powershell
 vagrant up
 ```
 
-**3. Kopiera SSH-nyckeln till WSL2**
+Detta kan ta 5–10 minuter första gången.
+
+Kontrollera att alla maskiner körs:
+
+```powershell
+vagrant status
+```
+
+Förväntat resultat:
+
+```text
+server    running
+client-a  running
+client-b  running
+```
+
+---
+
+### 3. Gå in i projektmappen från WSL2
+
+Öppna WSL2 och gå till samma projektmapp via `/mnt/c`:
 
 ```bash
+cd /mnt/c/Users/<dittanvändarnamn>/Projekt-4-Oliver-Philip
+```
+
+Exempel:
+
+```bash
+cd /mnt/c/Users/Phili/Projekt-4-Oliver-Philip
+```
+
+---
+
+### 4. Kopiera Vagrants SSH-nyckel till WSL2
+
+Eftersom Ansible körs från WSL2 behöver SSH-nyckeln finnas på Linux-sidan med korrekta rättigheter.
+
+```bash
+mkdir -p ~/.ssh
 cp /mnt/c/Users/<dittanvändarnamn>/.vagrant.d/insecure_private_keys/vagrant.key.rsa ~/.ssh/server_key
 chmod 600 ~/.ssh/server_key
 ```
 
-**4. Kör Ansible-playbooken från WSL2**
+Exempel:
 
 ```bash
-cd /mnt/c/Users/<dittanvändarnamn>/Projekt-4-Oliver-Philip
+mkdir -p ~/.ssh
+cp /mnt/c/Users/Phili/.vagrant.d/insecure_private_keys/vagrant.key.rsa ~/.ssh/server_key
+chmod 600 ~/.ssh/server_key
+```
+
+---
+
+### 5. Kör Ansible-playbooken från WSL2
+
+```bash
 ansible-playbook -i ansible/inventory.ini ansible/site.yml
 ```
 
-**5. Verifiera att behörigheterna fungerar**
+Playbooken skapar användare och grupper, konfigurerar NFS-servern, exporterar delningar, monterar dem på klienterna och aktiverar gruppkvoter.
+
+---
+
+### 6. Kontrollera att Ansible når alla maskiner
 
 ```bash
-vagrant ssh client-a
-sed -i 's/\r//' /vagrant/tests/verify.sh
-/bin/bash /vagrant/tests/verify.sh
+ansible all -i ansible/inventory.ini -m ping
 ```
 
-**Förväntat slutresultat:**
+Förväntat resultat:
 
+```text
+server | SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+client-a | SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+client-b | SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
 ```
+
+---
+
+### 7. Verifiera att behörigheterna fungerar
+
+Kör verifieringsskriptet via Ansible mot `client-a`:
+
+```bash
+ansible client-a -i ansible/inventory.ini -m shell -a "bash /vagrant/tests/verify.sh"
+```
+
+Förväntat slutresultat:
+
+```text
 Rensar gamla testfiler...
 Testar gemensam katalog...
 Testar att anna kan skriva till avdelning-a...
@@ -184,14 +277,14 @@ Alla tester lyckades.
 | Åtgärd | Var | Verifikation |
 |---|---|---|
 | Fasta UID/GID för alla användare och grupper | Alla VMs | `id anna` ska ge uid=3001 på alla maskiner |
-| Setgid på delningskataloger | NFS-server | `ls -la /shares/` ska visa `drwxrws---` |
+| Setgid på delningskataloger | NFS-server | `ls -la /shares/` ska visa `drwxrws---` eller motsvarande setgid-rättigheter |
 | Dedikerat tjänstkonto för NFS | NFS-server | `getent passwd svc_nfs` |
 | NFS exporterar enbart till privat nätverk | NFS-server | `sudo exportfs -v` ska visa 192.168.56.0/24 |
 | root_squash aktiverat på alla exports | NFS-server | `sudo exportfs -v` ska visa root_squash |
-| Kvoter per grupp (20 MB soft / 25 MB hard) | NFS-server | `sudo repquota -g /shares` |
+| Kvoter per grupp | NFS-server | `sudo repquota -g /shares` |
 | `_netdev` i fstab på klienter | Client-A, Client-B | `cat /etc/fstab \| grep nfs` |
-| SSH-nycklar utanför Git | Alla | Nyckeln läggs i `~/.ssh/`, finns i `.gitignore` |
-| Inga secrets i versionshanteringen | Alla | `git log --all -- *.key *.pem` |
+| SSH-nycklar utanför Git | Alla | Nyckeln läggs i `~/.ssh/`, inte i repot |
+| Inga secrets i versionshanteringen | Alla | `.gitignore` exkluderar `.vagrant/`, nycklar och VM-filer |
 
 ---
 
@@ -201,17 +294,17 @@ Alla tester lyckades.
 
 **Brist 1: NFS-trafik är okrypterad**
 
-NFS v3/v4 utan Kerberos skickar all trafik i klartext över nätverket. En angripare med tillgång till det interna nätverket kan avlyssna filinnehåll och potentiellt utföra man-in-the-middle-attacker eller replay-attacker.
+NFS utan Kerberos-baserad säkerhet skickar trafik okrypterat över nätverket. En angripare med tillgång till det interna nätverket kan avlyssna filinnehåll och potentiellt utföra man-in-the-middle-attacker eller replay-attacker.
 
-*Åtgärd i produktion:* WireGuard VPN.
+*Åtgärd i produktion:* WireGuard VPN eller Kerberos-baserad NFS-säkerhet.
 
-*Accepterat i denna miljö eftersom:* Det privata nätverket (192.168.56.0/24) är isolerat och enbart tillgängligt från värddatorn.
+*Accepterat i denna miljö eftersom:* Det privata nätverket (`192.168.56.0/24`) är isolerat och enbart tillgängligt från värddatorn.
 
 ---
 
 **Brist 2: Ingen brandvägg (UFW) konfigurerad**
 
-NFS-tjänsten (port 2049) och relaterade RPC-portar är öppna utan brandväggsbegränsningar. Alla maskiner i nätverket kan ansluta till NFS-servern.
+NFS-tjänsten och relaterade portar är öppna inom det privata nätverket. Alla maskiner i nätverket kan ansluta till NFS-servern.
 
 *Åtgärd i produktion:*
 
@@ -227,9 +320,9 @@ ufw deny 2049
 
 **Brist 3: Ingen loggning eller övervakning**
 
-Det finns ingen centraliserad loggsamling eller larmning vid ovanlig aktivitet — t.ex. upprepade misslyckade autentiseringsförsök, oväntat höga diskskrivningar eller kvotöverskridningar.
+Det finns ingen centraliserad loggsamling eller larmning vid ovanlig aktivitet, till exempel upprepade misslyckade autentiseringsförsök, oväntat höga diskskrivningar eller kvotöverskridningar.
 
-*Åtgärd i produktion:* Centraliserat SIEM med kvot- och disklarm.
+*Åtgärd i produktion:* Centraliserad loggning, SIEM, kvotlarm och diskutrymmesövervakning.
 
 *Accepterat i denna miljö eftersom:* Miljön används enbart lokalt för labbtestning och innehåller inga känsliga data.
 
@@ -241,79 +334,186 @@ Trots ovanstående brister har miljön följande skyddslager:
 
 - Nätverkssegmentering — det privata nätverket är isolerat från internet
 - Setgid på delningskataloger — korrekt gruppägarskap på alla nyskapade filer
-- Principen om minsta privilegium — anna kan inte skriva till berts avdelning
+- Principen om minsta privilegium — användare får bara skriva där de ska ha åtkomst
 - Fasta UIDs/GIDs — konsekvent identitetshantering över alla maskiner
-- `root_squash` — root-eskalering via NFS-klient förhindras
-- Kvoter — en användare kan inte fylla hela diskutrymmet
+- `root_squash` — root-eskalering via NFS-klient begränsas
+- Kvoter — en grupp kan inte fylla hela filsystemet
 - Inga secrets i Git — känsliga nycklar hanteras utanför versionshanteringen
 
 ---
 
 ## Verifiering
 
-Kör det automatiserade verifieringsskriptet från en klientmaskin:
+### Verifiering av behörigheter
+
+Kör det automatiserade verifieringsskriptet via Ansible mot `client-a`:
 
 ```bash
-vagrant ssh client-a
-sed -i 's/\r//' /vagrant/tests/verify.sh
-/bin/bash /vagrant/tests/verify.sh
+ansible client-a -i ansible/inventory.ini -m shell -a "bash /vagrant/tests/verify.sh"
 ```
 
 Skriptet kontrollerar:
 
 - Att alla användare kan skriva till gemensam-delningen
-- Att anna kan skriva till avdelning-a men INTE avdelning-b
-- Att bert kan skriva till avdelning-b men INTE avdelning-a
+- Att anna kan skriva till avdelning-a men inte avdelning-b
+- Att bert kan skriva till avdelning-b men inte avdelning-a
 - Att clara kan skriva till båda avdelningarna
+
+Förväntat resultat:
+
+```text
+Alla tester lyckades.
+```
+
+---
+
+### Verifiering av kvoter
+
+Kvoter verifieras genom att försöka skriva både små och stora filer till en delning.
+
+Rensa gamla quota-testfiler:
+
+```bash
+ansible server -i ansible/inventory.ini -b -m shell -a "rm -f /shares/avdelning-a/quota-big-test.bin /shares/avdelning-a/quota-small-test.bin"
+```
+
+Liten fil, ska lyckas:
+
+```bash
+ansible client-a -i ansible/inventory.ini -m shell -a "sudo -u anna bash -lc 'dd if=/dev/zero of=/mnt/avdelning-a/quota-small-test.bin bs=1M count=10 status=none; sync'"
+```
+
+Stor fil, ska stoppas av kvoten:
+
+```bash
+ansible client-a -i ansible/inventory.ini -m shell -a "sudo -u anna bash -lc 'dd if=/dev/zero of=/mnt/avdelning-a/quota-big-test.bin bs=1M count=100 status=progress; sync'"
+```
+
+Förväntat resultat:
+
+```text
+Disk quota exceeded
+```
+
+Det verifierar att gruppkvoterna fungerar korrekt.
+
+---
+
+### Kontroll av quota-status
+
+Quota-status kan kontrolleras på servern:
+
+```bash
+ansible server -i ansible/inventory.ini -b -m shell -a "repquota -g -s /shares"
+```
+
+Det ska visa gruppkvoter för bland annat `avd_a` och `avd_b`.
 
 ---
 
 ## Designval och motivering
 
-### Varför NFS och inte ett annat protokoll?
+### Varför NFS?
 
-Vi valde NFS eftersom kursen fokuserar på Linux-miljöer och NFS är nativt integrerat i Linux-kärnan utan extra konfiguration. Det finns alternativ vi övervägde:
+Vi valde NFS eftersom projektmiljön består av Linux-maskiner och NFS är ett naturligt val för filserverdelning mellan Linux-system. NFS är integrerat i Linux-miljön, fungerar väl med UID/GID-baserade behörigheter och passar bra för en intern server-klient-miljö.
 
-- **SSHFS** hade gett kryptering ur lådan men är betydligt långsammare och inte lämpat för flera parallella användare. I en miljö där prestanda spelar roll är NFS ett bättre val.
-- **iSCSI** är blocklagring snarare än fillagring och hade krävt en helt annan arkitektur, vilket vi ansåg vara onödigt komplext för vårt användningsfall.
+NFS passar särskilt bra i detta projekt eftersom:
 
-NFS passar bäst när alla maskiner kör Linux och befinner sig i ett kontrollerat nätverk, vilket stämmer med vår miljö.
+- alla klienter och servern kör Linux
+- miljön ligger i ett isolerat privat nätverk
+- behörigheter kan styras med Linux-grupper
+- klienterna kan montera delningar automatiskt via `/etc/fstab`
+- Ansible kan konfigurera både server och klienter på ett konsekvent sätt
+
+---
+
+### Varför inte Samba (SMB/CIFS)?
+
+Vi övervägde Samba eftersom det är vanligt i blandade Windows/Linux-miljöer och ger bra kompatibilitet mot Windows-klienter. Vi valde dock bort Samba av flera skäl:
+
+- Projektmiljön består enbart av Linux-maskiner, vilket gör NFS mer naturligt och enklare att konfigurera.
+- NFS är integrerat direkt i Linux-kärnan och kräver mindre overhead än SMB/CIFS.
+- Behörighetsstyrning med UID/GID fungerar mer konsekvent i rena Linux-miljöer.
+- NFS ger generellt bättre prestanda än Samba mellan Linux-system.
+- Projektets fokus låg på Linux-baserad filserverarkitektur snarare än kompatibilitet mellan operativsystem.
+
+Samba hade varit ett bättre val om klienterna huvudsakligen körde Windows eller om Active Directory-integration varit ett krav.
+
+---
+
+### Varför inte SSHFS?
+
+SSHFS hade gett kryptering via SSH, men valdes bort eftersom det inte är lika lämpligt för flera samtidiga användare och permanenta servermonteringar. SSHFS passar bättre för enklare personliga monteringar än för en central filservermiljö med flera användare, grupper och kvoter.
+
+---
+
+### Varför inte iSCSI?
+
+iSCSI är blocklagring snarare än fillagring. Det hade krävt en annan arkitektur där klienterna får tillgång till blockenheter snarare än gemensamma kataloger. För vårt användningsfall behövdes delade kataloger med Linux-behörigheter, vilket gör NFS mer passande.
+
+---
 
 ### Varför ett separat filsystem för /shares?
 
-`/shares` monteras från en dedikerad loop-enhet (`/srv/nfs-quota.img`) snarare än att ligga direkt på rot-filsystemet. Det finns två anledningar: kvoter i Linux kräver att de är aktiverade på filsystemsnivå (`usrquota,grpquota`), och ett separat filsystem förhindrar att NFS-användare fyller upp rot-partitionen och kraschar systemet.
+`/shares` monteras från en dedikerad loop-enhet (`/srv/nfs-quota.img`) snarare än att ligga direkt på rot-filsystemet.
+
+Det finns två huvudanledningar:
+
+1. Kvoter i Linux aktiveras på filsystemsnivå med exempelvis `usrquota` och `grpquota`.
+2. Ett separat filsystem förhindrar att NFS-användare fyller upp rot-partitionen och kraschar systemet.
+
+Detta gör lagringen mer kontrollerad och säkrare även i en labbmiljö.
+
+---
 
 ### Varför fasta UIDs och GIDs?
 
-NFS skickar inte användarnamn utan numeriska UIDs och GIDs. Om anna har UID 3001 på servern men UID 4001 på klienten ser NFS-servern en okänd användare och behörigheterna fungerar inte. Genom att definiera UIDs/GIDs explicit i `group_vars/all.yml` och applicera dem på alla maskiner via Ansible garanteras konsistens.
+NFS skickar inte användarnamn utan numeriska UIDs och GIDs. Om `anna` har UID 3001 på servern men UID 4001 på klienten kommer servern inte att tolka användaren korrekt, och behörigheterna kan bli fel.
+
+Genom att definiera UIDs och GIDs explicit i `group_vars/all.yml` och applicera dem på alla maskiner via Ansible garanteras konsistens mellan server och klienter.
+
+---
 
 ### Varför group_vars/all.yml istället för hårdkodade värden?
 
-Att samla all konfiguration i en fil gör det enkelt att lägga till användare, ändra kvoter eller byta IP-adress utan att röra tasks-koden. Det följer principen om separation of concerns — koden beskriver *hur* man konfigurerar, variablerna beskriver *vad* som ska konfigureras.
+Att samla all konfiguration i en variabelfil gör det enkelt att lägga till användare, ändra kvoter eller byta IP-adresser utan att ändra själva task-koden.
+
+Det följer principen separation of concerns:
+
+- playbooken beskriver hur systemet konfigureras
+- variabelfilen beskriver vad som ska konfigureras
+
+Det gör lösningen lättare att underhålla och vidareutveckla.
+
+---
 
 ### Varför bash -lc i verifieringsskriptet?
 
-`sudo -u anna bash -lc 'kommando'` öppnar ett login-shell som anna, vilket laddar användarens grupptillhörighet korrekt. Utan `-lc` kan grupper saknas i sessionen och NFS-behörigheterna fungerar inte som förväntat, vilket skulle ge falska testresultat.
+`sudo -u anna bash -lc 'kommando'` öppnar ett login-shell som användaren `anna`. Det gör att användarens grupptillhörighet laddas korrekt innan testkommandot körs.
+
+Utan `bash -lc` kan vissa gruppbehörigheter saknas i sessionen, vilket kan ge falska testresultat.
 
 ---
 
 ## Produktion vs labbmiljö
 
-| Område | Labbmiljö (nuvarande) | Produktionsmiljö |
+| Område | Labbmiljö | Produktionsmiljö |
 |---|---|---|
-| Kryptering | Ingen kryptering av NFS-trafik | WireGuard VPN |
-| SSH-nycklar | Vagrants gemensamma insecure key | Unika nycklar per maskin med regelbunden rotation |
-| Brandvägg | Ingen UFW-konfiguration | UFW med allow-regler per IP och port |
-| Autentisering | Lokala användare med statiska lösenord | Active Directory med centraliserad autentisering |
-| Övervakning | Ingen loggning | Centraliserad SIEM, kvotlarm, diskutrymmelarm |
-| Backup | Ingen backup | Automatiserade snapshots och off-site replikering |
-| Tillgänglighet | Single point of failure — en NFS-server | En extra NFS-server som backup |
-| Kvoter | 20 MB soft / 25 MB hard | Anpassade kvoter beroende på behov |
-| Secrets | SSH-nyckel i `~/.ssh` | HashiCorp Vault |
-| OS-härdning | Ingen härdning | CIS Benchmark |
+| Kryptering | Ingen kryptering av NFS-trafik | WireGuard VPN eller Kerberos |
+| SSH-nycklar | Vagrants standardnycklar | Unika nycklar per maskin med rotation |
+| Brandvägg | Ingen UFW-konfiguration | UFW med allow-regler per klient och port |
+| Autentisering | Lokala användare med fasta UID/GID | Active Directory, LDAP eller annan central identitetshantering |
+| Övervakning | Ingen central loggning | SIEM, logginsamling, kvotlarm och diskutrymmeslarm |
+| Backup | Ingen backup | Automatiserade snapshots och off-site backup |
+| Tillgänglighet | En NFS-server | Redundans eller backup-server |
+| Kvoter | 20 MB soft / 25 MB hard | Anpassade kvoter beroende på verksamhetens behov |
+| Secrets | SSH-nyckel i `~/.ssh` lokalt | HashiCorp Vault eller annan secret manager |
+| OS-härdning | Grundläggande standardinstallation | CIS Benchmark och regelbunden patchning |
 
 ---
 
+
+---
 *Skapad av: Oliver Paz och Philip Malm*  
 *Kurs: Virtualiseringsteknik*  
 *Datum: 2026-05-22*
